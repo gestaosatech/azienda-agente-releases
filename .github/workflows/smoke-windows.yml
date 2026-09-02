@@ -66,6 +66,8 @@ jobs:
       - name: Pairing against production hub (expects the polite 401)
         shell: pwsh
         run: |
+          # Native stderr (the expected error message!) must not abort the step.
+          $ErrorActionPreference = "Continue"
           npx --yes @electron/asar extract "$env:APP_DIR\resources\app.asar" extracted
           $env:ELECTRON_RUN_AS_NODE = "1"
           $out = & "$env:APP_DIR\Azienda Agente eSocial.exe" "$PWD\extracted\dist\cli.js" pair --hub https://satech-azienda.vercel.app --code FAKE-0000 --name "CI Windows VM" 2>&1 | Out-String
@@ -75,6 +77,7 @@ jobs:
       - name: First-run Chromium bootstrap (same command the app spawns)
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Continue"
           $env:ELECTRON_RUN_AS_NODE = "1"
           & "$env:APP_DIR\Azienda Agente eSocial.exe" "$env:APP_DIR\resources\app.asar.unpacked\node_modules\playwright\cli.js" install chromium 2>&1 | Out-String | Write-Host
           $chrome = Get-ChildItem "$env:LOCALAPPDATA\ms-playwright" -Recurse -Filter chrome.exe -ErrorAction SilentlyContinue | Select-Object -First 1
