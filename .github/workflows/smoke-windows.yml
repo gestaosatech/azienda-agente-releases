@@ -1,0 +1,107 @@
+name: smoke-windows
+
+# End-to-end smoke of the published installer on a real Windows x64 VM,
+# replicating what a collaborator does: download from the hub URL, silent
+# install, run the packaged code, pair against production, open the app.
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+jobs:
+  smoke:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - name: Download installer (same URL as the hub button)
+        shell: pwsh
+        run: |
+          curl.exe -sL -o Setup.exe https://github.com/gestaosatech/azienda-agente-releases/releases/latest/download/Azienda-Agente-eSocial-Setup.exe
+          $item = Get-Item Setup.exe
+          Write-Host "Size: $($item.Length) bytes"
+          (Get-FileHash Setup.exe -Algorithm SHA256).Hash | Tee-Object -FilePath sha256.txt
+          if ($item.Length -lt 50MB) { throw "Installer suspiciously small" }
+
+      - name: Silent install (NSIS /S)
+        shell: pwsh
+        run: |
+          Start-Process -FilePath .\Setup.exe -ArgumentList "/S" -Wait
+          Start-Sleep -Seconds 20
+          $dir = "$env:LOCALAPPDATA\Programs\Azienda Agente eSocial"
+          if (-not (Test-Path "$dir\Azienda Agente eSocial.exe")) {
+            Write-Host "Expected dir not found, searching..."
+            Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter *.exe | ForEach-Object { $_.FullName }
+            throw "Installed exe not found"
+          }
+          Write-Host "Installed at: $dir"
+          "APP_DIR=$dir" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Binary runs on this VM (arch + electron)
+        shell: pwsh
+        run: |
+          $env:ELECTRON_RUN_AS_NODE = "1"
+          & "$env:APP_DIR\Azienda Agente eSocial.exe" -e "console.log('platform=' + process.platform + ' arch=' + process.arch + ' electron=' + process.versions.electron)"
+          if ($LASTEXITCODE -ne 0) { throw "Binary failed to run in node mode" }
+
+      - name: Packaged code is the mapped driver (not a stale build)
+        shell: pwsh
+        run: |
+          npx --yes @electron/asar extract-file "$env:APP_DIR\resources\app.asar" dist/core/real-driver.js
+          $hits = (Select-String -Path real-driver.js -Pattern "CadastroDomestico").Count
+          Write-Host "CadastroDomestico occurrences: $hits"
+          if ($hits -lt 1) { throw "Packaged driver is NOT the mapped v0.3 driver" }
+          if (-not (Test-Path "$env:APP_DIR\resources\app.asar.unpacked\node_modules\playwright\cli.js")) {
+            throw "playwright/cli.js missing from app.asar.unpacked (Chromium bootstrap would fail)"
+          }
+
+      - name: Pairing against production hub (expects the polite 401)
+        shell: pwsh
+        run: |
+          npx --yes @electron/asar extract "$env:APP_DIR\resources\app.asar" extracted
+          $env:ELECTRON_RUN_AS_NODE = "1"
+          $out = & "$env:APP_DIR\Azienda Agente eSocial.exe" "$PWD\extracted\dist\cli.js" pair --hub https://satech-azienda.vercel.app --code FAKE-0000 --name "CI Windows VM" 2>&1 | Out-String
+          Write-Host $out
+          if ($out -notmatch "pareamento inv") { throw "Did not get the expected invalid-pairing-code message from production" }
+
+      - name: First-run Chromium bootstrap (same command the app spawns)
+        shell: pwsh
+        run: |
+          $env:ELECTRON_RUN_AS_NODE = "1"
+          & "$env:APP_DIR\Azienda Agente eSocial.exe" "$env:APP_DIR\resources\app.asar.unpacked\node_modules\playwright\cli.js" install chromium
+          if ($LASTEXITCODE -ne 0) { throw "Chromium bootstrap failed" }
+          $chrome = Get-ChildItem "$env:LOCALAPPDATA\ms-playwright" -Recurse -Filter chrome.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $chrome) { throw "Chromium not found after bootstrap" }
+          Write-Host "Chromium ready: $($chrome.FullName)"
+
+      - name: Launch the real app (GUI) and verify it stays alive
+        shell: pwsh
+        run: |
+          Start-Process -FilePath "$env:APP_DIR\Azienda Agente eSocial.exe"
+          Start-Sleep -Seconds 25
+          $procs = Get-Process | Where-Object { $_.Name -like "Azienda*" }
+          if (-not $procs) { throw "App is not running 25s after launch" }
+          $procs | ForEach-Object { Write-Host "Running: $($_.Name) pid=$($_.Id)" }
+
+      - name: Screenshot of the VM desktop
+        if: always()
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Windows.Forms
+          Add-Type -AssemblyName System.Drawing
+          $bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
+          $bmp = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
+          $gfx = [System.Drawing.Graphics]::FromImage($bmp)
+          $gfx.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+          $bmp.Save("desktop.png", [System.Drawing.Imaging.ImageFormat]::Png)
+          Write-Host "Saved desktop.png"
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-evidence
+          path: |
+            desktop.png
+            sha256.txt
+          if-no-files-found: ignore
