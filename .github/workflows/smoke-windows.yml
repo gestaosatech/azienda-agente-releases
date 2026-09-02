@@ -26,11 +26,18 @@ jobs:
         shell: pwsh
         run: |
           Start-Process -FilePath .\Setup.exe -ArgumentList "/S" -Wait
-          Start-Sleep -Seconds 20
-          $exe = Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter "Azienda Agente eSocial.exe" | Select-Object -First 1
+          # The NSIS stub can hand off to a child process; poll until the app lands.
+          $deadline = (Get-Date).AddSeconds(240)
+          $exe = $null
+          while (-not $exe -and (Get-Date) -lt $deadline) {
+            Start-Sleep -Seconds 10
+            $exe = Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter "Azienda Agente eSocial.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+            $installers = (Get-Process | Where-Object { $_.Name -like "*Setup*" -or $_.Name -like "*Azienda*" }).Name -join ","
+            Write-Host "waiting... installers running: [$installers]"
+          }
           if (-not $exe) {
-            Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter *.exe | ForEach-Object { $_.FullName }
-            throw "Installed exe not found"
+            Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
+            throw "Installed exe not found after 240s"
           }
           $dir = $exe.DirectoryName
           Write-Host "Installed at: $dir"
