@@ -55,7 +55,7 @@ jobs:
       - name: Packaged code is the mapped driver (not a stale build)
         shell: pwsh
         run: |
-          npx --yes @electron/asar extract-file "$env:APP_DIR\resources\app.asar" dist/core/real-driver.js
+          npx --yes @electron/asar extract-file "$env:APP_DIR\resources\app.asar" "dist\core\real-driver.js"
           $hits = (Select-String -Path real-driver.js -Pattern "CadastroDomestico").Count
           Write-Host "CadastroDomestico occurrences: $hits"
           if ($hits -lt 1) { throw "Packaged driver is NOT the mapped v0.3 driver" }
