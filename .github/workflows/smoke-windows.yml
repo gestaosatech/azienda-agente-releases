@@ -47,8 +47,10 @@ jobs:
         shell: pwsh
         run: |
           $env:ELECTRON_RUN_AS_NODE = "1"
-          & "$env:APP_DIR\Azienda Agente eSocial.exe" -e "console.log('platform=' + process.platform + ' arch=' + process.arch + ' electron=' + process.versions.electron)"
-          if ($LASTEXITCODE -ne 0) { throw "Binary failed to run in node mode" }
+          # GUI-subsystem exes don't report exit codes reliably to pwsh: assert on output.
+          $out = & "$env:APP_DIR\Azienda Agente eSocial.exe" -e "console.log('platform=' + process.platform + ' arch=' + process.arch + ' electron=' + process.versions.electron)" 2>&1 | Out-String
+          Write-Host $out
+          if ($out -notmatch "platform=win32 arch=x64") { throw "Binary did not report win32/x64" }
 
       - name: Packaged code is the mapped driver (not a stale build)
         shell: pwsh
@@ -74,8 +76,7 @@ jobs:
         shell: pwsh
         run: |
           $env:ELECTRON_RUN_AS_NODE = "1"
-          & "$env:APP_DIR\Azienda Agente eSocial.exe" "$env:APP_DIR\resources\app.asar.unpacked\node_modules\playwright\cli.js" install chromium
-          if ($LASTEXITCODE -ne 0) { throw "Chromium bootstrap failed" }
+          & "$env:APP_DIR\Azienda Agente eSocial.exe" "$env:APP_DIR\resources\app.asar.unpacked\node_modules\playwright\cli.js" install chromium 2>&1 | Out-String | Write-Host
           $chrome = Get-ChildItem "$env:LOCALAPPDATA\ms-playwright" -Recurse -Filter chrome.exe -ErrorAction SilentlyContinue | Select-Object -First 1
           if (-not $chrome) { throw "Chromium not found after bootstrap" }
           Write-Host "Chromium ready: $($chrome.FullName)"
