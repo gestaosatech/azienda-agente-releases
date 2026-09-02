@@ -27,12 +27,12 @@ jobs:
         run: |
           Start-Process -FilePath .\Setup.exe -ArgumentList "/S" -Wait
           Start-Sleep -Seconds 20
-          $dir = "$env:LOCALAPPDATA\Programs\Azienda Agente eSocial"
-          if (-not (Test-Path "$dir\Azienda Agente eSocial.exe")) {
-            Write-Host "Expected dir not found, searching..."
+          $exe = Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter "Azienda Agente eSocial.exe" | Select-Object -First 1
+          if (-not $exe) {
             Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter *.exe | ForEach-Object { $_.FullName }
             throw "Installed exe not found"
           }
+          $dir = $exe.DirectoryName
           Write-Host "Installed at: $dir"
           "APP_DIR=$dir" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
