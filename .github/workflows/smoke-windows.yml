@@ -73,6 +73,8 @@ jobs:
           $out = & "$env:APP_DIR\Azienda Agente eSocial.exe" "$PWD\extracted\dist\cli.js" pair --hub https://satech-azienda.vercel.app --code FAKE-0000 --name "CI Windows VM" 2>&1 | Out-String
           Write-Host $out
           if ($out -notmatch "pareamento inv") { throw "Did not get the expected invalid-pairing-code message from production" }
+          Write-Host "Production returned the expected polite 401."
+          exit 0  # the pair CLI exits 1 by design on an invalid code
 
       - name: First-run Chromium bootstrap (same command the app spawns)
         shell: pwsh
