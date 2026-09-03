@@ -76,6 +76,18 @@ jobs:
           Write-Host "Production returned the expected polite 401."
           exit 0  # the pair CLI exits 1 by design on an invalid code
 
+      - name: Playwright CLI resolves through the app's own code
+        shell: pwsh
+        run: |
+          # Regression for ERR_PACKAGE_PATH_NOT_EXPORTED (Natalia's notebook, v0.3.1):
+          # run the packaged module the app itself uses, not a hand-built path.
+          $ErrorActionPreference = "Continue"
+          $env:ELECTRON_RUN_AS_NODE = "1"
+          $out = & "$env:APP_DIR\Azienda Agente eSocial.exe" -e "const m = require('./extracted/dist/core/playwright-cli.js'); const fs = require('fs'); const p = m.playwrightCliPath(); console.log('resolved: ' + p + ' exists=' + fs.existsSync(p));" 2>&1 | Out-String
+          Write-Host $out
+          if ($out -notmatch "exists=true") { throw "playwrightCliPath failed inside the package" }
+          exit 0
+
       - name: First-run Chromium bootstrap (same command the app spawns)
         shell: pwsh
         run: |
