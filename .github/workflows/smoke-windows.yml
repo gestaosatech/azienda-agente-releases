@@ -76,6 +76,22 @@ jobs:
           Write-Host "Production returned the expected polite 401."
           exit 0  # the pair CLI exits 1 by design on an invalid code
 
+      - name: Installed app reports the released version
+        shell: pwsh
+        run: |
+          # Natalia ran v0.3.1 for a week because a failed update left the old
+          # app in place; assert the freshly installed build is the new one.
+          $tag = "${{ github.event.release.tag_name }}"
+          $expected = if ($tag) { $tag.TrimStart("v") } else { $null }
+          $pkg = Get-Content "$PWD\extracted\package.json" -Raw | ConvertFrom-Json
+          Write-Host "packaged version: $($pkg.version) (release tag: $tag)"
+          if ($expected -and $pkg.version -ne $expected) {
+            throw "Installed app is $($pkg.version) but the release is $expected"
+          }
+          if ((Select-String -Path "$PWD\extracted\renderer\index.html" -Pattern "version-badge").Count -lt 1) {
+            throw "Version badge missing from the UI"
+          }
+
       - name: Playwright CLI resolves through the app's own code
         shell: pwsh
         run: |
@@ -106,6 +122,22 @@ jobs:
           $procs = Get-Process | Where-Object { $_.Name -like "Azienda*" }
           if (-not $procs) { throw "App is not running 25s after launch" }
           $procs | ForEach-Object { Write-Host "Running: $($_.Name) pid=$($_.Id)" }
+
+      - name: Portable build runs with no installation
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Continue"
+          curl.exe -sL -o Portatil.exe https://github.com/gestaosatech/azienda-agente-releases/releases/latest/download/Azienda-Agente-eSocial-Portatil.exe
+          $item = Get-Item Portatil.exe
+          Write-Host "Portable size: $($item.Length) bytes"
+          if ($item.Length -lt 50MB) { throw "Portable build missing or truncated" }
+          Get-Process | Where-Object { $_.Name -like "Azienda*" } | Stop-Process -Force -ErrorAction SilentlyContinue
+          Start-Sleep -Seconds 3
+          Start-Process -FilePath .\Portatil.exe
+          Start-Sleep -Seconds 40
+          $procs = Get-Process | Where-Object { $_.Name -like "Azienda*" }
+          if (-not $procs) { throw "Portable app is not running 40s after launch" }
+          $procs | ForEach-Object { Write-Host "Running (portable): $($_.Name) pid=$($_.Id)" }
 
       - name: Screenshot of the VM desktop
         if: always()
