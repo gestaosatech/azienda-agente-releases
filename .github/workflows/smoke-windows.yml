@@ -25,7 +25,8 @@ jobs:
       - name: Silent install (NSIS /S)
         shell: pwsh
         run: |
-          Start-Process -FilePath .\Setup.exe -ArgumentList "/S" -Wait
+          $proc = Start-Process -FilePath .\Setup.exe -ArgumentList "/S" -Wait -PassThru
+          Write-Host "installer exit code: $($proc.ExitCode)"
           # The NSIS stub can hand off to a child process; poll until the app lands.
           $deadline = (Get-Date).AddSeconds(240)
           $exe = $null
@@ -36,7 +37,14 @@ jobs:
             Write-Host "waiting... installers running: [$installers]"
           }
           if (-not $exe) {
+            Write-Host "--- %LOCALAPPDATA%\Programs ---"
             Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
+            Write-Host "--- Defender detections ---"
+            Get-MpThreatDetection -ErrorAction SilentlyContinue | Select-Object -First 5 | Format-List | Out-String | Write-Host
+            Get-MpThreat -ErrorAction SilentlyContinue | Select-Object -First 5 ThreatName, Resources | Format-List | Out-String | Write-Host
+            Write-Host "--- app error events ---"
+            Get-WinEvent -FilterHashtable @{LogName='Application'; Level=1,2} -MaxEvents 5 -ErrorAction SilentlyContinue |
+              ForEach-Object { Write-Host "$($_.TimeCreated) $($_.ProviderName): $($_.Message -replace "`r`n", ' ' )".Substring(0, [Math]::Min(300, "$($_.TimeCreated) $($_.ProviderName): $($_.Message)".Length)) }
             throw "Installed exe not found after 240s"
           }
           $dir = $exe.DirectoryName
